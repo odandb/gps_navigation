@@ -5,5 +5,5 @@ abstract class NavigationMap {
 
   Future<bool> exist();
 
-  void action();
+  void action({String address, double latitude, double longitude});
 }

@@ -2,21 +2,22 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:gps_navigation/src/maps/google_maps.dart';
+import 'package:gps_navigation/src/maps/map.dart';
 import 'package:gps_navigation/src/maps/plans.dart';
 import 'package:gps_navigation/src/maps/waze.dart';
 
 ///
 /// Class that allow the gps navigation to a destination via a modal sheet
 ///
-class NavigationHelper {
-  static final _instance = NavigationHelper._();
+class GpsNavigation {
+  static final _instance = GpsNavigation._();
 
-  NavigationHelper._();
+  GpsNavigation._();
 
   ///
   /// Return the static instance of the class
   ///
-  factory NavigationHelper() => _instance;
+  factory GpsNavigation() => _instance;
 
   ///
   /// Show a modal bottom sheet with a list of [ListTile], each representing a navigation application available on the device
@@ -39,7 +40,8 @@ class NavigationHelper {
   /// If [address], [latitude] and [longitude] are all null, throw an [Exception]
   /// [address] will prevail over the coordinates if both exist
   ///
-  /// Can throw a [NavigationException] if the navigation to an app can not be launch
+  /// Will throw a [NavigationException] if the navigation to an app can not be launch
+  /// Will throw an [Exception] if no navigation application is available
   ///
   void showNavigationModal(
     BuildContext context, {
@@ -47,49 +49,60 @@ class NavigationHelper {
     double borderRadius = 6.0,
     double itemHeight = 56.0,
     Color itemTitleColor = Colors.black,
+    bool openIfSingleNavigationApp = true,
     String address,
     double latitude,
     double longitude,
   }) async {
-    if (address == null && latitude == null && longitude == null) {
+    if (!_navigationValuesValid(address, latitude, longitude)) {
       throw Exception("Address or coordinates must exist");
     }
 
+    // Get the navigation map children
+    final List<NavigationMap> children = await _getNavigationChildren();
+
+    // Throw an exception if no navigation application is available
+    if (children.isEmpty) {
+      throw Exception("No navigation application available");
+    }
+
+    // If there's only one navigation application and that the user chose to open automatically, execute the action
+    if (children.length == 1 && openIfSingleNavigationApp) {
+      children.first.action(
+        address: address,
+        latitude: latitude,
+        longitude: longitude,
+      );
+
+      return;
+    }
+
+    // Check if the values provided are valid
     Color _backgroundColor = backgroundColor ?? Colors.white;
-    double _radius =
-        (borderRadius == null || borderRadius < 0) ? 6.0 : borderRadius;
-    double _height = (itemHeight == null || itemHeight < 0) ? 56.0 : itemHeight;
+
+    double _radius = 6.0;
+    if (borderRadius != null && borderRadius >= 0) {
+      _radius = borderRadius;
+    }
+
+    double _height = 56.0;
+    if (itemHeight != null && itemHeight >= 20.0) {
+      _height = itemHeight;
+    }
+
     Color _titleColor = itemTitleColor ?? Colors.black;
 
-    final children = await _getModalChildren(
+    // Open the modal once all the verifications are done
+    _openModal(
       context,
-      itemHeight: _height,
-      itemTitleColor: _titleColor,
-      address: address,
-      latitude: latitude,
-      longitude: longitude,
-    );
-
-    if (children.isEmpty) return;
-
-    // Show the modal sheet
-    showModalBottomSheet(
-      context: context,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(_radius),
-          topRight: Radius.circular(_radius),
-        ),
-      ),
-      backgroundColor: _backgroundColor,
-      builder: (_) {
-        return SafeArea(
-          child: Container(
-            height: children.length * _height,
-            child: Column(children: children),
-          ),
-        );
-      },
+      children,
+      address,
+      latitude,
+      longitude,
+      _radius,
+      _backgroundColor,
+      _height,
+      _titleColor,
     );
   }
 
@@ -100,106 +113,107 @@ class NavigationHelper {
   ///
 
   ///
-  /// Return the list of children that will be display inside the modal sheet
+  /// Open the modal bottom sheet
   ///
-  Future<List<Widget>> _getModalChildren(
-    BuildContext context, {
-    double itemHeight,
-    Color itemTitleColor,
+  void _openModal(
+    BuildContext context,
+    List<NavigationMap> children,
     String address,
     double latitude,
     double longitude,
-  }) async {
-    var children = List<Widget>();
+    double radius,
+    Color backgroundColor,
+    double height,
+    Color itemColor,
+  ) {
+    // Show the modal sheet
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(radius),
+          topRight: Radius.circular(radius),
+        ),
+      ),
+      backgroundColor: backgroundColor,
+      builder: (_) {
+        return SafeArea(
+          child: Container(
+            height: children.length * height,
+            child: Column(
+              children: children.map(
+                ((map) {
+                  return SizedBox(
+                    height: height,
+                    child: ListTile(
+                      title: Center(
+                        child: Text(
+                          map.name,
+                          style: TextStyle(color: itemColor),
+                        ),
+                      ),
+                      onTap: () {
+                        // Close the modal bottom sheet
+                        Navigator.of(context).pop();
 
-    // If the address and the coordinates are not valid, return an empty array
+                        // Wait a bit for the modal to close and execute the action
+                        Future.delayed(Duration(milliseconds: 300), () {
+                          map.action(
+                            address: address,
+                            latitude: latitude,
+                            longitude: longitude,
+                          );
+                        });
+                      },
+                    ),
+                  );
+                }),
+              ).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  ///
+  /// Return true if the values are valid, false otherwise
+  ///
+  /// The values are valid if the address is not null and not empty, or if the latitude and longitude are not null
+  ///
+  bool _navigationValuesValid(
+    String address,
+    double latitude,
+    double longitude,
+  ) {
     final bool addressNotValid = address == null || address.isEmpty;
-    if (addressNotValid && latitude == null && longitude == null) {
-      return children;
+    if (addressNotValid == null && latitude == null && longitude == null) {
+      return false;
+    } else {
+      return true;
     }
+  }
+
+  ///
+  /// Return the list of children that will be display inside the modal sheet
+  ///
+  Future<List<NavigationMap>> _getNavigationChildren() async {
+    var children = List<NavigationMap>();
 
     // If Google Maps exist, add the option into the list
-    final googleMapsExist = await GoogleMaps().exist();
-    if (googleMapsExist) {
-      children.add(
-        SizedBox(
-          height: itemHeight,
-          child: ListTile(
-              title: Center(
-                child: Text(
-                  GoogleMaps().name,
-                  style: TextStyle(color: itemTitleColor),
-                ),
-              ),
-              onTap: () {
-                Navigator.of(context).pop();
-                Future.delayed(Duration(milliseconds: 300), () {
-                  GoogleMaps().action(
-                    address: address,
-                    latitude: latitude,
-                    longitude: longitude,
-                  );
-                });
-              }),
-        ),
-      );
+    if (await GoogleMaps().exist()) {
+      children.add(new GoogleMaps());
     }
 
     // If Waze exist, add the option into the list
-    final wazeExist = await Waze().exist();
-    if (wazeExist) {
-      children.add(
-        SizedBox(
-          height: itemHeight,
-          child: ListTile(
-            title: Center(
-              child: Text(
-                Waze().name,
-                style: TextStyle(color: itemTitleColor),
-              ),
-            ),
-            onTap: () {
-              Navigator.of(context).pop();
-              Future.delayed(Duration(milliseconds: 300), () {
-                Waze().action(
-                  address: address,
-                  latitude: latitude,
-                  longitude: longitude,
-                );
-              });
-            },
-          ),
-        ),
-      );
+    if (await Waze().exist()) {
+      children.add(new Waze());
     }
 
     // If we're on an iOS device and that Plans exist, add the option into the list
     if (Platform.isIOS) {
-      final plansExist = await Plans().exist();
-      if (plansExist) {
-        children.add(
-          SizedBox(
-            height: itemHeight,
-            child: ListTile(
-              title: Center(
-                child: Text(
-                  Plans().name,
-                  style: TextStyle(color: itemTitleColor),
-                ),
-              ),
-              onTap: () {
-                Navigator.of(context).pop();
-                Future.delayed(Duration(milliseconds: 300), () {
-                  Plans().action(
-                    address: address,
-                    latitude: latitude,
-                    longitude: longitude,
-                  );
-                });
-              },
-            ),
-          ),
-        );
+      if (await Plans().exist()) {
+        children.add(new Plans());
       }
     }
 
