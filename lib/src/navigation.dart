@@ -72,7 +72,14 @@ class GpsNavigation {
     }
 
     // Open the modal once all the verifications are done
-    _openModal(context, children, address, latitude, longitude, options);
+    _openModal(
+      context,
+      children,
+      address,
+      latitude,
+      longitude,
+      options ?? new GpsNavigationOptions(),
+    );
   }
 
   ///
