@@ -48,6 +48,8 @@ class GpsNavigation {
     double latitude,
     double longitude,
   }) async {
+    if (options == null) options = GpsNavigationOptions();
+
     if (!_navigationValuesValid(address, latitude, longitude)) {
       throw Exception("Address or coordinates must exist");
     }
